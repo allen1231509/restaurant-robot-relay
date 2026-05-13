@@ -69,6 +69,8 @@ wss.on('connection', (ws, req) => {
         ws.on('message', (data) => {
             try {
                 const msg = JSON.parse(data.toString());
+                console.log('Robot →', msg.action);
+
                 if (msg.action === 'llegueAMesa') {
                     sendToAllMeseros({ type: 'robot_en_mesa', mesa: msg.mesa });
                 }
@@ -76,11 +78,20 @@ wss.on('connection', (ws, req) => {
                     sendToAllCocinas({ type: 'nuevo_pedido', mesa: msg.mesa, items: msg.items, hora: new Date().toLocaleTimeString() });
                     sendToAllMeseros({ type: 'pedido_recibido', mesa: msg.mesa });
                 }
+                // 🆕 Robot llegó a cocina → avisar a cocina para que muestre botón "Ya cargué"
+                if (msg.action === 'robotEnCocina') {
+                    console.log('🤖 Robot en cocina esperando carga, mesa:', msg.mesa);
+                    sendToAllCocinas({ type: 'robot_en_cocina', mesa: msg.mesa });
+                }
                 if (msg.action === 'entregaCompletada') {
                     sendToAllMeseros({ type: 'entrega_completada', mesa: msg.mesa });
+                    sendToAllCocinas({ type: 'entrega_completada', mesa: msg.mesa });
                 }
                 if (msg.action === 'estadoRobot') {
                     broadcastAll({ type: 'estado_robot', bateria: msg.bateria, ubicacion: msg.ubicacion });
+                }
+                if (msg.action === 'errorRobot') {
+                    broadcastAll({ type: 'error_robot', mesa: msg.mesa, detalle: msg.detalle });
                 }
             } catch (e) {
                 console.error('Error robot:', e.message);
@@ -122,6 +133,10 @@ wss.on('connection', (ws, req) => {
                     sendToRobot({ action: 'irARecepcion' });
                     broadcastAll({ type: 'robot_navegando', destino: 'recepcion' });
                 }
+                if (msg.action === 'detener') {
+                    sendToRobot({ action: 'detener' });
+                    broadcastAll({ type: 'robot_detenido' });
+                }
             } catch (e) {
                 console.error('Error mesero:', e.message);
             }
@@ -129,7 +144,6 @@ wss.on('connection', (ws, req) => {
 
         ws.on('close', () => {
             meseroSockets.delete(ws);
-            console.log(`👨‍🍳 Mesero desconectado (total: ${meseroSockets.size})`);
         });
 
         ws.on('error', (err) => console.error('Mesero error:', err.message));
@@ -146,10 +160,17 @@ wss.on('connection', (ws, req) => {
         ws.on('message', (data) => {
             try {
                 const msg = JSON.parse(data.toString());
+
+                // Cocina presiona "Listo" → robot va a cocina a recoger
                 if (msg.action === 'pedidoListo') {
                     sendToRobot({ action: 'irACocina', mesa: msg.mesa });
                     sendToAllMeseros({ type: 'pedido_listo', mesa: msg.mesa });
                     broadcastAll({ type: 'robot_navegando', destino: 'cocina', mesa: msg.mesa });
+                }
+                // 🆕 Cocina presiona "Ya cargué" → robot sale hacia la mesa
+                if (msg.action === 'pedidoCargado') {
+                    sendToRobot({ action: 'pedidoCargado', mesa: msg.mesa });
+                    broadcastAll({ type: 'robot_llevando', mesa: msg.mesa });
                 }
             } catch (e) {
                 console.error('Error cocina:', e.message);
@@ -158,16 +179,15 @@ wss.on('connection', (ws, req) => {
 
         ws.on('close', () => {
             cocinaSockets.delete(ws);
-            console.log(`🍳 Cocina desconectada (total: ${cocinaSockets.size})`);
         });
 
         ws.on('error', (err) => console.error('Cocina error:', err.message));
 
     } else {
-        ws.close(1008, 'type inválido — usa ?type=robot, ?type=mesero o ?type=cocina');
+        ws.close(1008, 'type inválido');
     }
 });
 
 server.listen(PORT, () => {
-    console.log(`🚀 Restaurant Robot Relay corriendo en puerto ${PORT}`);
+    console.log(`🚀 Relay corriendo en puerto ${PORT}`);
 });
